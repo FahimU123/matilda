@@ -1,0 +1,15 @@
+node_modules/
+.env
+.env.local
+.next/
+*.tsbuildinfo
+.DS_Store
+ios/build/
+ios/*.xcodeproj/xcuserdata/
+ios/*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+ios/Config/Matilda.xcconfig
+lipread/assets/*.onnx
+lipread/assets/*.tflite
+lipread/.venv/
+__pycache__/

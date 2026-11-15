@@ -1,0 +1,27 @@
+[project]
+name = "matilda-lipread"
+version = "0.1.0"
+description = "Lip reading service for Matilda"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.163.0",
+    "mediapipe>=1.2.3",
+    "numpy>=2.5.4",
+    "onnxruntime>=1.32.0",
+    "opencv-python-headless>=5.0.0.93",
+    "pydantic>=2.14.3",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

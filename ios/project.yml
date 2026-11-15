@@ -1,0 +1,62 @@
+name: Matilda
+options:
+  bundleIdPrefix: app.matilda
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+configFiles:
+  Debug: Config/Matilda.xcconfig
+  Release: Config/Matilda.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+    DEVELOPMENT_TEAM: $(MATILDA_DEVELOPMENT_TEAM)
+targets:
+  Matilda:
+    type: application
+    platform: iOS
+    sources:
+      - Matilda
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MATILDA_BUNDLE_ID)
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_CFBundleDisplayName: Matilda
+        INFOPLIST_KEY_NSCameraUsageDescription: Matilda watches for a thumbs up and reads your lips so you can answer on calls without speaking. While a question is on screen, short clips of your mouth go to the Matilda server to be read.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Matilda asks for Face ID before she says a private number for you.
+        INFOPLIST_KEY_NSMotionUsageDescription: Matilda uses your AirPods to notice when you nod or shake your head.
+        CODE_SIGN_STYLE: Automatic
+    info:
+      path: Matilda/Resources/Info.plist
+      properties:
+        MatildaServerURL: $(MATILDA_SERVER_URL)
+        MatildaProfileID: $(MATILDA_PROFILE_ID)
+        MatildaAppKey: $(MATILDA_APP_KEY)
+        UISupportsAssistiveAccess: true
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+  MatildaTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - MatildaTests
+    dependencies:
+      - target: Matilda
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(MATILDA_BUNDLE_ID).tests
+schemes:
+  Matilda:
+    build:
+      targets:
+        Matilda: all
+        MatildaTests: [test]
+    test:
+      targets:
+        - MatildaTests

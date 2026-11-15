@@ -1,0 +1,8 @@
+// Copy to Matilda.xcconfig. A free Apple ID team works for running on your own iPhone.
+MATILDA_DEVELOPMENT_TEAM =
+MATILDA_BUNDLE_ID = app.matilda.Matilda
+// Use your Mac's LAN address or the deployed server. Note the escaped slashes.
+MATILDA_SERVER_URL = http:/$()/192.168.1.20:8787
+MATILDA_PROFILE_ID = ray
+// Must match APP_KEY on the server.
+MATILDA_APP_KEY = dev-app-key-change-me
