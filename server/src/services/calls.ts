@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { GoogleGenAI } from "@google/genai";
-import { buildCard, declineSay, sayForSensitive } from "../domain/answerCard.js";
+import { buildCard, declineSay, sayForSensitive, type AnswerCard } from "../domain/answerCard.js";
 import { CallSession, type Speaker } from "../domain/callSession.js";
-import type { PendingAsks } from "../domain/pendingAsks.js";
+import type { AskOutcome, PendingAsks } from "../domain/pendingAsks.js";
 import { findField, findPlace, maskValue, type Place, type Profile } from "../domain/profile.js";
 import type { QuestionAnalyzer } from "../domain/questionAnalyzer.js";
 import type { Hub } from "../realtime/hub.js";
@@ -14,6 +14,7 @@ export class CallNotFound extends Error {}
 export class LineUnavailable extends Error {}
 
 const longNumber = /\d(?:[\s.-]?\d){4,}/g;
+const composingTimeoutMs = 90_000;
 
 interface ActiveCall {
   session: CallSession;
@@ -31,7 +32,9 @@ export class CallCoordinator {
     private readonly analyzer: QuestionAnalyzer,
     private readonly summarizer: { ai: GoogleGenAI | undefined; models: string[] },
     private readonly now: () => number = Date.now,
-  ) {}
+  ) {
+    asks.onSettle((callId, card, outcome) => this.closed(callId, card, outcome));
+  }
 
   async start(profileId: string, placeId: string): Promise<{ callId: string; ringing: boolean }> {
     const profile = await this.store.profile(profileId);
@@ -102,26 +105,14 @@ export class CallCoordinator {
     }
 
     const result = await outcome;
-    if (isNew && call.session.phase !== "ended") {
-      call.session.apply({ type: "askClosed" });
-      this.publishPhase(callId);
-    }
-
     switch (result.kind) {
-      case "answered": {
-        if (isNew) {
-          this.hub.send(`app:${call.profile.id}`, { type: "card.closed", callId, cardId: card.id, said: result.say });
-          this.hub.send("line", { type: "approved", callId, method: result.method, name: call.profile.displayName });
-        }
+      case "held":
+        return `${call.profile.displayName} is mouthing a longer answer. Tell them politely it will take about twenty seconds, then call ask_user again with exactly the same question.`;
+      case "answered":
         return result.say;
-      }
-      case "declined": {
-        const say = declineSay(call.profile);
-        if (isNew) this.hub.send(`app:${call.profile.id}`, { type: "card.closed", callId, cardId: card.id, said: say });
-        return `${say} Ask the question again so ${call.profile.displayName} can choose the right answer.`;
-      }
+      case "declined":
+        return `${declineSay(call.profile)} Ask the question again so ${call.profile.displayName} can choose the right answer.`;
       case "timedOut":
-        if (isNew) this.hub.send(`app:${call.profile.id}`, { type: "card.closed", callId, cardId: card.id, said: null });
         return `${call.profile.displayName} needs a little more time. Politely ask the other person to hold for a moment, then ask again.`;
     }
   }
@@ -134,38 +125,41 @@ export class CallCoordinator {
       return;
     }
 
-    const card = this.asks.card(message.cardId);
-    const callId = card && this.findCallForCard(message.cardId);
-    const call = callId ? this.active.get(callId) : undefined;
-    if (!card || !call || call.profile.id !== profileId) return;
+    const found = this.cardContext(message.cardId);
+    if (!found || found.call.profile.id !== profileId) return;
+    const { card, call } = found;
 
-    if (message.type === "decline") {
-      call.session.consent({ question: card.question, answer: "Declined", method: message.method, at: this.now() });
-      this.asks.settle(card.id, { kind: "declined", method: message.method });
-      return;
+    switch (message.type) {
+      case "composing":
+        this.asks.hold(card.id, composingTimeoutMs);
+        return;
+      case "decline":
+        call.session.consent({ question: card.question, answer: "Declined", method: message.method, at: this.now() });
+        this.asks.settle(card.id, { kind: "declined", method: message.method });
+        return;
+      case "say": {
+        const text = message.text.trim();
+        if (card.sensitiveFieldKey !== undefined || text.length === 0 || text.length > 300) return;
+        call.session.consent({ question: card.question, answer: text, method: message.method, at: this.now() });
+        this.asks.settle(card.id, { kind: "answered", say: text, suggestionId: "custom", method: message.method });
+        return;
+      }
+      case "answer":
+        this.answer(call, card, message);
     }
+  }
 
-    const suggestion = card.suggestions.find((option) => option.id === message.suggestionId);
-    if (!suggestion) return;
-    const sensitive = card.sensitiveFieldKey !== undefined;
-    if (sensitive && !message.value) return;
-
-    const say = sensitive ? sayForSensitive(suggestion.say, message.value!) : suggestion.say;
-    call.session.consent({
-      question: card.question,
-      answer: sensitive ? maskValue(message.value!) : suggestion.label,
-      method: message.method,
-      at: this.now(),
-    });
-    this.asks.settle(card.id, { kind: "answered", say, suggestionId: suggestion.id, method: message.method });
+  openCard(cardId: string): { card: AnswerCard; profile: Profile; purpose: string } | undefined {
+    const found = this.cardContext(cardId);
+    return found && { card: found.card, profile: found.call.profile, purpose: found.call.place.purpose };
   }
 
   async finish(callId: string): Promise<void> {
     const call = this.active.get(callId);
     if (!call) return;
-    this.active.delete(callId);
-    this.asks.cancelCall(callId);
     if (call.session.phase !== "ended") call.session.apply({ type: "hungUp" });
+    this.asks.cancelCall(callId);
+    this.active.delete(callId);
     this.publishPhase(callId, call);
 
     const summary = await summarizeCall(this.summarizer.ai, this.summarizer.models, call.session.transcript);
@@ -191,11 +185,43 @@ export class CallCoordinator {
     });
   }
 
-  private findCallForCard(cardId: string): string | undefined {
-    for (const [callId] of this.active) {
-      if (this.asks.openFor(callId).some((card) => card.id === cardId)) return callId;
+  private answer(call: ActiveCall, card: AnswerCard, message: Extract<AppMessage, { type: "answer" }>): void {
+    const suggestion = card.suggestions.find((option) => option.id === message.suggestionId);
+    if (!suggestion) return;
+    const sensitive = card.sensitiveFieldKey !== undefined;
+    if (sensitive && !message.value) return;
+
+    const say = sensitive ? sayForSensitive(suggestion.say, message.value!) : suggestion.say;
+    call.session.consent({
+      question: card.question,
+      answer: sensitive ? maskValue(message.value!) : suggestion.label,
+      method: message.method,
+      at: this.now(),
+    });
+    this.asks.settle(card.id, { kind: "answered", say, suggestionId: suggestion.id, method: message.method });
+  }
+
+  // Runs once per card, whichever tool call (if any) is still waiting on it.
+  private closed(callId: string, card: AnswerCard, outcome: AskOutcome): void {
+    const call = this.active.get(callId);
+    if (!call) return;
+    if (call.session.phase !== "ended") {
+      call.session.apply({ type: "askClosed" });
+      this.publishPhase(callId);
     }
-    return undefined;
+    const said =
+      outcome.kind === "answered" ? outcome.say : outcome.kind === "declined" ? declineSay(call.profile) : null;
+    this.hub.send(`app:${call.profile.id}`, { type: "card.closed", callId, cardId: card.id, said });
+    if (outcome.kind === "answered") {
+      this.hub.send("line", { type: "approved", callId, method: outcome.method, name: call.profile.displayName });
+    }
+  }
+
+  private cardContext(cardId: string): { card: AnswerCard; call: ActiveCall } | undefined {
+    const card = this.asks.card(cardId);
+    const callId = this.asks.callFor(cardId);
+    const call = callId ? this.active.get(callId) : undefined;
+    return card && call ? { card, call } : undefined;
   }
 
   private publishPhase(callId: string, call = this.active.get(callId)): void {

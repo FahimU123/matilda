@@ -3,13 +3,15 @@ import Observation
 
 /// Owns every hands-free input and merges them into one stream of answers for the call screen.
 @Observable
-final class GestureHub {
+final class GestureHub: LipRecorder {
     private(set) var cameraRunning = false
     private(set) var airPodsConnected = false
     private(set) var readingLips = false
     private(set) var lastSignal: String?
     private(set) var lastSource: InputSource?
     private(set) var signals = 0
+    /// Live camera feedback while Ray mouths a longer answer; nil when not recording.
+    private(set) var recording: RecordingStatus?
 
     @ObservationIgnored private var continuation: AsyncStream<GestureEvent>.Continuation?
     @ObservationIgnored private var camera: FaceCamera?
@@ -18,6 +20,7 @@ final class GestureHub {
     @ObservationIgnored private var question: String?
     @ObservationIgnored private var questionOpenedAt = Date.distantPast
     @ObservationIgnored private var lipRead: Task<Void, Never>?
+    @ObservationIgnored private var onRecordingFinished: (() -> Void)?
     /// Ignores gestures that began before the question appeared, like a listening nod.
     @ObservationIgnored private let settleTime: TimeInterval = 0.5
 
@@ -38,7 +41,9 @@ final class GestureHub {
         guard camera == nil else { return }
         let camera = FaceCamera(handlers: .init(
             thumb: { [weak self] pose in Task { @MainActor in self?.handle(pose) } },
-            mouthed: { [weak self] clip in Task { @MainActor in self?.handle(clip) } }
+            mouthed: { [weak self] clip in Task { @MainActor in self?.handle(clip) } },
+            recording: { [weak self] status in Task { @MainActor in self?.updateRecording(status) } },
+            recordingFinished: { [weak self] in Task { @MainActor in self?.recordingDidFinish() } }
         ))
         let headMotion = HeadMotionMonitor(
             onGesture: { [weak self] gesture in Task { @MainActor in self?.handle(gesture) } },
@@ -67,7 +72,36 @@ final class GestureHub {
         camera?.setCapturing(false)
     }
 
+    func startRecording(onFinished: @escaping () -> Void) {
+        lipRead?.cancel()
+        onRecordingFinished = onFinished
+        recording = RecordingStatus(faceVisible: true, lipsMoving: false)
+        camera?.startRecording()
+    }
+
+    func finishRecording() -> LipClip? {
+        onRecordingFinished = nil
+        recording = nil
+        return camera?.finishRecording()
+    }
+
+    func cancelRecording() {
+        _ = finishRecording()
+    }
+
+    private func updateRecording(_ status: RecordingStatus) {
+        guard recording != nil else { return }
+        recording = status
+    }
+
+    private func recordingDidFinish() {
+        let finished = onRecordingFinished
+        onRecordingFinished = nil
+        finished?()
+    }
+
     func stop() {
+        cancelRecording()
         endAnswering()
         camera?.stop()
         headMotion?.stop()
@@ -104,7 +138,7 @@ final class GestureHub {
     }
 
     private func emit(_ event: GestureEvent, signal: String, from source: InputSource) {
-        guard question != nil, Date.now.timeIntervalSince(questionOpenedAt) >= settleTime else { return }
+        guard question != nil, recording == nil, Date.now.timeIntervalSince(questionOpenedAt) >= settleTime else { return }
         lastSignal = signal
         lastSource = source
         signals += 1

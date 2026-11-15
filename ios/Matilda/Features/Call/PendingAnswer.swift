@@ -4,4 +4,6 @@ nonisolated struct PendingAnswer: Equatable, Sendable {
     var cardID: String
     var index: Int
     var method: ConfirmMethod
+    /// Set when Ray is saying a sentence of his own instead of one of the suggestions.
+    var text: String? = nil
 }

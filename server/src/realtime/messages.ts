@@ -11,6 +11,8 @@ export const AppMessage = z.discriminatedUnion("type", [
     value: z.string().optional(),
   }),
   z.object({ type: z.literal("decline"), cardId: z.string(), method: ConfirmMethod }),
+  z.object({ type: z.literal("composing"), cardId: z.string() }),
+  z.object({ type: z.literal("say"), cardId: z.string(), text: z.string(), method: ConfirmMethod }),
   z.object({ type: z.literal("hangup"), callId: z.string() }),
 ]);
 export type AppMessage = z.infer<typeof AppMessage>;

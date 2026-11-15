@@ -37,6 +37,7 @@ const app = await buildApp({
   webOrigin: config.WEB_ORIGIN,
   requireFamily: familyAuth(config.SSOJET_ISSUER, config.SSOJET_CLIENT_ID),
   lipreadUrl: config.LIPREAD_URL,
+  gemini: { ai, models: config.GEMINI_MODELS },
 });
 
 await app.listen({ port: config.PORT, host: "0.0.0.0" });

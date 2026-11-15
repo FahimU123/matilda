@@ -9,7 +9,9 @@ struct CallControls: View {
         let compact = typeSize.isAccessibilitySize
         let layout = compact ? AnyLayout(HStackLayout(spacing: 16)) : AnyLayout(VStackLayout(spacing: 16))
         layout {
-            SensorStrip(compact: compact)
+            if call.compose == .idle {
+                SensorStrip(compact: compact)
+            }
             Button(action: hangUp) {
                 VStack(spacing: 8) {
                     Image(systemName: "phone.down.fill")

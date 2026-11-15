@@ -1,3 +1,4 @@
+import Foundation
 @testable import Matilda
 
 final class SpyChannel: CallChannel, @unchecked Sendable {
@@ -60,4 +61,33 @@ struct SlowVault: SecureVault {
         return value
     }
     func remove(_ key: String) throws {}
+}
+
+final class FakeRecorder: LipRecorder {
+    var clip: LipClip? = LipClip(frames: Array(repeating: Data([0xFF]), count: 10), fps: 25)
+    private(set) var isRecording = false
+    private var onFinished: (() -> Void)?
+
+    func startRecording(onFinished: @escaping () -> Void) {
+        isRecording = true
+        self.onFinished = onFinished
+    }
+
+    func finishRecording() -> LipClip? {
+        isRecording = false
+        return clip
+    }
+
+    func cancelRecording() {
+        isRecording = false
+    }
+
+    func lipsRested() {
+        onFinished?()
+    }
+}
+
+struct StubReader: AnswerReader {
+    var reading = LipReading(heard: "i need my carbon dopa", sentence: "I need a refill of my carbidopa-levodopa.")
+    func readAnswer(cardID: String, clip: LipClip) async throws -> LipReading { reading }
 }

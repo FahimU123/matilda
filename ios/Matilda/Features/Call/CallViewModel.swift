@@ -17,11 +17,20 @@ final class CallViewModel: Identifiable {
     private(set) var confirmations = 0
     private(set) var rejections = 0
     private(set) var liveSince: Date?
+    private(set) var compose: ComposeStage = .idle
+    /// The sentence Ray will say. Filled in from his lips, and he can edit or type it.
+    var draft = "" {
+        didSet { if draft.count > Self.draftLimit { draft = String(draft.prefix(Self.draftLimit)) } }
+    }
+    /// The server refuses longer sentences.
+    static let draftLimit = 300
 
     @ObservationIgnored private let channel: any CallChannel
     @ObservationIgnored private let events: AsyncStream<ServerEvent>
     @ObservationIgnored private let gestures: AsyncStream<GestureEvent>
     @ObservationIgnored private let vault: any SecureVault
+    @ObservationIgnored private let recorder: any LipRecorder
+    @ObservationIgnored private let reader: any AnswerReader
     @ObservationIgnored private let commitDelay: Duration
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private(set) var commitTask: Task<Void, Never>?
@@ -34,6 +43,8 @@ final class CallViewModel: Identifiable {
         events: AsyncStream<ServerEvent>,
         gestures: AsyncStream<GestureEvent>,
         vault: any SecureVault,
+        recorder: any LipRecorder,
+        reader: any AnswerReader,
         commitDelay: Duration = .milliseconds(1200)
     ) {
         self.callID = callID
@@ -43,6 +54,8 @@ final class CallViewModel: Identifiable {
         self.events = events
         self.gestures = gestures
         self.vault = vault
+        self.recorder = recorder
+        self.reader = reader
         self.commitDelay = commitDelay
     }
 
@@ -77,6 +90,7 @@ final class CallViewModel: Identifiable {
         tasks.forEach { $0.cancel() }
         tasks.removeAll()
         commitTask?.cancel()
+        resetCompose()
     }
 
     func handle(_ event: ServerEvent) {
@@ -100,11 +114,13 @@ final class CallViewModel: Identifiable {
             highlighted = 0
             pending = nil
             notice = nil
+            resetCompose()
         case .cardClosed(_, let cardID, _):
             guard card?.id == cardID else { return }
             card = nil
             pending = nil
             commitTask?.cancel()
+            resetCompose()
         case .summary(_, let summary, let entries):
             consents = entries
             finish(summary: summary.isEmpty ? nil : summary)
@@ -112,6 +128,20 @@ final class CallViewModel: Identifiable {
     }
 
     func handle(_ gesture: GestureEvent) {
+        switch compose {
+        case .idle: break
+        case .recording, .reading: return
+        case .ready:
+            switch gesture {
+            case .confirm(let method): sayDraft(method: method)
+            case .decline: if pending != nil { stopPending() } else { resetCompose() }
+            case .choose: break
+            }
+            return
+        case .failed:
+            if case .decline = gesture { resetCompose() }
+            return
+        }
         switch gesture {
         case .confirm(let method):
             approve(index: highlighted, method: method)
@@ -136,6 +166,79 @@ final class CallViewModel: Identifiable {
         notice = "Stopped. Nothing was said."
     }
 
+    // MARK: Saying something else
+
+    var canCompose: Bool {
+        guard let card, !card.isSensitive, pending == nil else { return false }
+        return compose == .idle
+    }
+
+    func startComposing() {
+        guard canCompose, let card else { return }
+        notice = nil
+        draft = ""
+        compose = .recording
+        recorder.startRecording { [weak self] in
+            Task { await self?.finishComposing() }
+        }
+        Task { [channel] in try? await channel.send(.composing(cardID: card.id)) }
+    }
+
+    func finishComposing() async {
+        guard compose == .recording, let card else { return }
+        compose = .reading
+        guard let clip = recorder.finishRecording() else {
+            compose = .failed("\(Copy.assistantName) couldn't see your lips move. Hold the phone in front of your face and try again.")
+            return
+        }
+        do {
+            let reading = try await reader.readAnswer(cardID: card.id, clip: clip)
+            guard compose == .reading, self.card?.id == card.id else { return }
+            draft = reading.sentence
+            compose = .ready(heard: reading.heard)
+        } catch {
+            guard compose == .reading else { return }
+            compose = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Skips lip reading for anyone who would rather type.
+    func typeInstead() {
+        guard card != nil, pending == nil else { return }
+        if compose == .recording { recorder.cancelRecording() }
+        if case .ready = compose { return }
+        draft = ""
+        compose = .ready(heard: "")
+    }
+
+    func cancelComposing() {
+        resetCompose()
+    }
+
+    func retryComposing() {
+        resetCompose()
+        startComposing()
+    }
+
+    func sayDraft(method: ConfirmMethod) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case .ready = compose, let card, !text.isEmpty, pending == nil else { return }
+        pending = PendingAnswer(cardID: card.id, index: -1, method: method, text: text)
+        confirmations += 1
+        commitTask?.cancel()
+        commitTask = Task { [weak self, commitDelay] in
+            try? await Task.sleep(for: commitDelay)
+            guard !Task.isCancelled else { return }
+            await self?.commit()
+        }
+    }
+
+    private func resetCompose() {
+        if compose == .recording { recorder.cancelRecording() }
+        compose = .idle
+        draft = ""
+    }
+
     func hangUp() async {
         commitTask?.cancel()
         do {
@@ -152,11 +255,12 @@ final class CallViewModel: Identifiable {
         card = nil
         pending = nil
         commitTask?.cancel()
+        resetCompose()
         stage = .ended(summary: summary)
     }
 
     private func approve(index: Int, method: ConfirmMethod) {
-        guard let card, card.suggestions.indices.contains(index), pending == nil else { return }
+        guard compose == .idle, let card, card.suggestions.indices.contains(index), pending == nil else { return }
         highlighted = index
         pending = PendingAnswer(cardID: card.id, index: index, method: method)
         confirmations += 1
@@ -187,6 +291,15 @@ final class CallViewModel: Identifiable {
 
     private func commit() async {
         guard let pending, let card, card.id == pending.cardID else { return }
+        if let text = pending.text {
+            do {
+                try await channel.send(.say(cardID: card.id, text: text, method: pending.method))
+            } catch {
+                self.pending = nil
+                notice = "Could not reach \(Copy.assistantName). Check the connection and try again."
+            }
+            return
+        }
         let suggestion = card.suggestions[pending.index]
         var value: String?
 

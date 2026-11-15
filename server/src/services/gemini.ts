@@ -86,3 +86,51 @@ export async function summarizeCall(
   }
   return "";
 }
+
+export async function interpretLipReading(
+  ai: GoogleGenAI | undefined,
+  models: string[],
+  { question, purpose, profile, heard }: { question: string; purpose: string; profile: Profile; heard: string },
+  timeoutMs = 4_000,
+): Promise<string> {
+  const fallback = sentenceCase(heard);
+  if (!ai) return fallback;
+  const details = profile.fields
+    .filter((field) => !field.sensitive)
+    .map((field) => `${field.label}: ${field.value}`)
+    .join("\n");
+  const prompt = [
+    `${profile.displayName} cannot speak clearly and mouthed an answer on a phone call. A lip reading model transcribed it, with mistakes.`,
+    `Call purpose: ${purpose}.`,
+    `Saved details about ${profile.displayName}:\n${details}`,
+    `The other person asked: "${question}"`,
+    `Lip reading transcript: "${heard}"`,
+    `Write the most likely sentence ${profile.displayName} meant, in the first person, answering the question.`,
+    `Keep the meaning, never add facts that are not in the transcript, use at most 25 words. Reply with the sentence only, plain text.`,
+  ].join("\n\n");
+
+  const deadline = Date.now() + timeoutMs;
+  for (const model of models) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 200) break;
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { abortSignal: AbortSignal.timeout(remaining) },
+      });
+      const sentence = response.text?.trim().replace(/^"|"$/g, "");
+      if (sentence) return sentence;
+    } catch {
+      // Fall through to the next model.
+    }
+  }
+  return fallback;
+}
+
+export function sentenceCase(text: string): string {
+  const words = text.trim().replace(/\s+/g, " ").toLowerCase().replace(/\bi\b/g, "I");
+  if (!words) return "";
+  const sentence = words[0]!.toUpperCase() + words.slice(1);
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}

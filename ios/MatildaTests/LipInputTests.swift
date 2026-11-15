@@ -40,4 +40,28 @@ struct LipInputTests {
     func serverCommandsMapToAnswers(command: LipCommand) {
         #expect(LipCommand(rawValue: command.rawValue) == command)
     }
+
+    @Test func aSentenceEndsWhenTheLipsRest() {
+        var recording = SentenceRecording()
+        var finishedAt: Double?
+        for step in 0..<300 {
+            let time = Double(step) / 60
+            let moving = time >= 0.5 && time < 2.5
+            recording.append(Data([UInt8(step % 255)]), at: time)
+            if recording.feed(moving ? [0.4, 0.3, 0.2] : [0, 0, 0], at: time) { finishedAt = finishedAt ?? time }
+        }
+        #expect(abs((finishedAt ?? 0) - 4.0) < 0.05)
+        let clip = recording.clip()
+        #expect(clip != nil)
+        #expect((clip?.frames.count ?? 0) < 200)
+    }
+
+    @Test func nothingMouthedGivesNoClip() {
+        var recording = SentenceRecording()
+        for step in 0..<120 {
+            recording.append(Data([1]), at: Double(step) / 60)
+            _ = recording.feed([0, 0, 0], at: Double(step) / 60)
+        }
+        #expect(recording.clip() == nil)
+    }
 }

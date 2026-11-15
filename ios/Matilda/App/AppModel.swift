@@ -29,7 +29,7 @@ final class AppModel {
         store: LocalStore? = (try? LocalStore()) ?? (try? LocalStore(inMemory: true))
     ) {
         self.store = store
-        api = LiveMatildaAPI(baseURL: configuration.serverURL)
+        api = LiveMatildaAPI(baseURL: configuration.serverURL, appKey: configuration.appKey)
         channel = WebSocketCallChannel(serverURL: configuration.serverURL, profileID: configuration.profileID, appKey: configuration.appKey)
         profileID = configuration.profileID
         self.vault = vault
@@ -76,7 +76,9 @@ final class AppModel {
                 channel: channel,
                 events: events,
                 gestures: gestures.events(),
-                vault: vault
+                vault: vault,
+                recorder: gestures,
+                reader: api
             )
             call.start()
             activeCall = call

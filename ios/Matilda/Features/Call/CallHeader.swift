@@ -35,6 +35,7 @@ struct CallHeader: View {
     private var status: (text: String, symbol: String, color: Color) {
         switch call.stage {
         case .ringing: ("Calling", "phone.arrow.up.right", Theme.inkSoft)
+        case .live where call.compose != .idle: ("They're holding for you", "clock", Theme.wait)
         case .live where call.isWaitingOnUser: ("Your answer is ready", "hand.raised", Theme.wait)
         case .live: ("\(Copy.assistantName) is on the call", "waveform", Theme.confirm)
         case .ended: ("Call ended", "phone.down", Theme.inkSoft)

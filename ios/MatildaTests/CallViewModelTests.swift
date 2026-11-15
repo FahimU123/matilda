@@ -3,6 +3,7 @@ import Testing
 
 struct CallViewModelTests {
     let channel = SpyChannel()
+    let recorder = FakeRecorder()
 
     func makeCall(vault: StubVault = StubVault(), delay: Duration = .zero) -> CallViewModel {
         CallViewModel(
@@ -13,6 +14,8 @@ struct CallViewModelTests {
             events: AsyncStream { _ in },
             gestures: AsyncStream { _ in },
             vault: vault,
+            recorder: recorder,
+            reader: StubReader(),
             commitDelay: delay
         )
     }
@@ -56,6 +59,64 @@ struct CallViewModelTests {
         #expect(channel.sent == [.decline(cardID: "card-1", method: .nod)])
     }
 
+    @Test func mouthingASentenceSaysWhatRayApproves() async {
+        let call = makeCall()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.choiceCard))
+        call.startComposing()
+        #expect(recorder.isRecording)
+
+        await call.finishComposing()
+        #expect(call.compose == .ready(heard: "i need my carbon dopa"))
+        #expect(call.draft == "I need a refill of my carbidopa-levodopa.")
+
+        call.handle(.confirm(.nod))
+        await call.commitTask?.value
+        #expect(channel.sent == [
+            .composing(cardID: "card-2"),
+            .say(cardID: "card-2", text: "I need a refill of my carbidopa-levodopa.", method: .nod),
+        ])
+    }
+
+    @Test func gesturesWhileMouthingAreIgnored() async {
+        let call = makeCall()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.choiceCard))
+        call.startComposing()
+        call.handle(.confirm(.lips))
+        call.handle(.choose(index: 1, method: .lips))
+
+        #expect(call.pending == nil)
+        #expect(call.compose == .recording)
+    }
+
+    @Test func aFixedSentenceIsWhatGetsSaid() async {
+        let call = makeCall()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.choiceCard))
+        call.typeInstead()
+        call.draft = "  Can you deliver it on Friday?  "
+        call.sayDraft(method: .tap)
+        await call.commitTask?.value
+
+        #expect(channel.sent == [.say(cardID: "card-2", text: "Can you deliver it on Friday?", method: .tap)])
+    }
+
+    @Test func privateNumbersCannotBeMouthed() {
+        let call = makeCall()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.ssnCard))
+        #expect(!call.canCompose)
+        call.startComposing()
+        #expect(call.compose == .idle)
+    }
+
+    @Test func aNewQuestionDropsAHalfFinishedAnswer() {
+        let call = makeCall()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.choiceCard))
+        call.startComposing()
+        call.handle(.cardOpened(callID: "call-1", card: Sample.dobCard))
+
+        #expect(call.compose == .idle)
+        #expect(!recorder.isRecording)
+    }
+
     @Test func stoppingDuringFaceIDNeverSendsThePrivateNumber() async throws {
         let call = CallViewModel(
             callID: "call-1",
@@ -65,6 +126,8 @@ struct CallViewModelTests {
             events: AsyncStream { _ in },
             gestures: AsyncStream { _ in },
             vault: SlowVault(),
+            recorder: recorder,
+            reader: StubReader(),
             commitDelay: .zero
         )
         call.handle(.cardOpened(callID: "call-1", card: Sample.ssnCard))

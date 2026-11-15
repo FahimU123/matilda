@@ -131,4 +131,67 @@ describe("CallCoordinator", () => {
     await ctx.calls.finish(callId);
     expect(ctx.app.sent.some((m) => m.type === "call.summary")).toBe(true);
   });
+
+  it("holds the agent while the user mouths a longer answer, then speaks it once", async () => {
+    const { callId } = await ctx.calls.start("ray", "pharmacy");
+    const first = ctx.calls.ask(callId, "Anything else we should know?");
+    const card = await nextCard(ctx.app);
+
+    ctx.calls.respond("ray", { type: "composing", cardId: card.id });
+    await expect(first).resolves.toMatch(/^Ray is mouthing a longer answer\./);
+    expect(ctx.app.sent.some((m) => m.type === "card.closed")).toBe(false);
+
+    const again = ctx.calls.ask(callId, "Anything else we should know?");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ctx.app.sent.filter((m) => m.type === "card.open")).toHaveLength(1);
+
+    ctx.calls.respond("ray", { type: "say", cardId: card.id, text: "  I also need my inhaler refilled.  ", method: "lips" });
+    await expect(again).resolves.toBe("I also need my inhaler refilled.");
+    expect(ctx.app.sent.filter((m) => m.type === "card.closed")).toEqual([
+      { type: "card.closed", callId, cardId: card.id, said: "I also need my inhaler refilled." },
+    ]);
+    expect(ctx.line.sent.filter((m) => m.type === "approved")).toHaveLength(1);
+    expect(ctx.app.sent.findLast((m) => m.type === "call.state").phase).toBe("live");
+
+    await ctx.calls.finish(callId);
+    const [record] = await ctx.store.calls("ray", 1);
+    expect(record?.consents[0]).toMatchObject({ answer: "I also need my inhaler refilled.", method: "lips" });
+  });
+
+  it("ignores free-form sentences for sensitive questions", async () => {
+    const { callId } = await ctx.calls.start("ray", "pharmacy");
+    void ctx.calls.ask(callId, "Can you verify the social security number?");
+    const card = await nextCard(ctx.app);
+    ctx.calls.respond("ray", { type: "say", cardId: card.id, text: "It is 6789", method: "lips" });
+    expect(ctx.calls.openCard(card.id)).toBeDefined();
+    expect(ctx.app.sent.some((m) => m.type === "card.closed")).toBe(false);
+    await ctx.calls.finish(callId);
+  });
+
+  it("closes the card on the phone when a held question is never asked again", async () => {
+    const { callId } = await ctx.calls.start("ray", "pharmacy");
+    const spoken = ctx.calls.ask(callId, "Anything else we should know?");
+    const card = await nextCard(ctx.app);
+    ctx.calls.respond("ray", { type: "composing", cardId: card.id });
+    await spoken;
+
+    await ctx.calls.finish(callId);
+    expect(ctx.app.sent.filter((m) => m.type === "card.closed")).toEqual([
+      { type: "card.closed", callId, cardId: card.id, said: null },
+    ]);
+  });
+
+  it("keeps an answer given before the agent repeats a held question", async () => {
+    const { callId } = await ctx.calls.start("ray", "pharmacy");
+    const first = ctx.calls.ask(callId, "Anything else we should know?");
+    const card = await nextCard(ctx.app);
+    ctx.calls.respond("ray", { type: "composing", cardId: card.id });
+    await first;
+
+    ctx.calls.respond("ray", { type: "say", cardId: card.id, text: "Please call me back after noon.", method: "lips" });
+    await expect(ctx.calls.ask(callId, "Anything else we should know?")).resolves.toBe("Please call me back after noon.");
+    expect(ctx.app.sent.filter((m) => m.type === "card.open")).toHaveLength(1);
+    expect(ctx.app.sent.filter((m) => m.type === "card.closed")).toHaveLength(1);
+  });
 });
+

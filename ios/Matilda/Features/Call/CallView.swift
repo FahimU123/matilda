@@ -43,5 +43,18 @@ struct CallView: View {
             if let cardID { model.gestures.beginAnswering(cardID) } else { model.gestures.endAnswering() }
         }
         .onDisappear(perform: call.stop)
+        #if DEBUG
+        .task(id: call.card?.id) {
+            guard call.card != nil else { return }
+            switch UserDefaults.standard.string(forKey: "autoCompose") {
+            case "record": call.startComposing()
+            case "type": call.typeInstead()
+            case "fail":
+                call.startComposing()
+                await call.finishComposing()
+            default: break
+            }
+        }
+        #endif
     }
 }

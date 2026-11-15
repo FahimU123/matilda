@@ -19,7 +19,7 @@ from .model import LipReader
 from .mouth import NoFaceFound, crop_sequence, load_mean_face
 
 ASSETS = Path(os.environ.get("LIPREAD_ASSETS", Path(__file__).resolve().parent.parent / "assets"))
-MAX_FRAMES = 150
+MAX_FRAMES = 300
 MAX_FRAME_CHARS = 300_000
 
 

@@ -10,6 +10,8 @@ nonisolated final class FaceCamera: NSObject, ARSessionDelegate, @unchecked Send
     struct Handlers: Sendable {
         var thumb: @Sendable (ThumbPose) -> Void
         var mouthed: @Sendable (LipClip) -> Void
+        var recording: @Sendable (RecordingStatus) -> Void
+        var recordingFinished: @Sendable () -> Void
     }
 
     static var isSupported: Bool { ARFaceTrackingConfiguration.isSupported }
@@ -28,6 +30,7 @@ nonisolated final class FaceCamera: NSObject, ARSessionDelegate, @unchecked Send
         var frames = FrameBuffer()
         var frameCount = 0
         var capturing = false
+        var sentence: SentenceRecording?
     }
 
     init(handlers: Handlers) {
@@ -59,6 +62,18 @@ nonisolated final class FaceCamera: NSObject, ARSessionDelegate, @unchecked Send
         }
     }
 
+    func startRecording() {
+        state.withLock { $0.sentence = SentenceRecording() }
+    }
+
+    /// Ends the recording and returns the part where the lips moved.
+    func finishRecording() -> LipClip? {
+        state.withLock { state in
+            defer { state.sentence = nil }
+            return state.sentence?.clip()
+        }
+    }
+
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
         let count: Int? = state.withLock { state in
             guard state.capturing else { return nil }
@@ -66,6 +81,11 @@ nonisolated final class FaceCamera: NSObject, ARSessionDelegate, @unchecked Send
             return state.frameCount
         }
         guard let count else { return }
+
+        if state.withLock({ $0.sentence != nil }) {
+            record(frame, count: count)
+            return
+        }
 
         if count.isMultiple(of: 2), let jpeg = uprightJPEG(frame.capturedImage) {
             state.withLock { $0.frames.append(jpeg, at: frame.timestamp) }
@@ -86,14 +106,31 @@ nonisolated final class FaceCamera: NSObject, ARSessionDelegate, @unchecked Send
         }
     }
 
-    private func uprightJPEG(_ buffer: CVPixelBuffer) -> Data? {
+    /// Sentence clips are long, so frames are smaller to keep the upload to a few megabytes.
+    private func record(_ frame: ARFrame, count: Int) {
+        let jpeg = count.isMultiple(of: 2) ? uprightJPEG(frame.capturedImage, height: 360, quality: 0.6) : nil
+        let face = frame.anchors.lazy.compactMap { $0 as? ARFaceAnchor }.first { $0.isTracked }
+        let features = face.map(MouthFeatures.vector(from:))
+
+        let (finished, status) = state.withLock { state -> (Bool, RecordingStatus?) in
+            guard state.sentence != nil else { return (false, nil) }
+            if let jpeg { state.sentence?.append(jpeg, at: frame.timestamp) }
+            let finished = features.map { state.sentence?.feed($0, at: frame.timestamp) ?? false } ?? false
+            let moving = features != nil && (state.sentence?.lipsMoving ?? false)
+            return (finished, count.isMultiple(of: 6) ? RecordingStatus(faceVisible: face != nil, lipsMoving: moving) : nil)
+        }
+        if let status { handlers.recording(status) }
+        if finished { handlers.recordingFinished() }
+    }
+
+    private func uprightJPEG(_ buffer: CVPixelBuffer, height: Double = 480, quality: Double = 0.7) -> Data? {
         let image = CIImage(cvPixelBuffer: buffer).oriented(.leftMirrored)
-        let scale = 480 / max(image.extent.height, 1)
+        let scale = height / max(image.extent.height, 1)
         let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         return imageContext.jpegRepresentation(
             of: small,
             colorSpace: colorSpace,
-            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: 0.7]
+            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: quality]
         )
     }
 }

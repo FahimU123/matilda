@@ -12,25 +12,32 @@ struct AnswerCardView: View {
                         .font(.title3)
                         .foregroundStyle(Theme.inkSoft)
                     Text(card.question)
-                        .font(.largeTitle.weight(.semibold))
+                        .font(call.compose == .idle ? .largeTitle.weight(.semibold) : .title2.weight(.semibold))
                         .foregroundStyle(Theme.ink)
                 }
 
-                ForEach(card.suggestions.enumerated(), id: \.element.id) { index, suggestion in
-                    SuggestionButton(
-                        suggestion: suggestion,
-                        number: index + 1,
-                        isHighlighted: index == call.highlighted,
-                        isSending: call.pending?.index == index,
-                        showsNumber: card.suggestions.count > 1,
-                        action: { call.tapSuggestion(at: index) }
-                    )
-                }
+                if call.compose == .idle {
+                    ForEach(card.suggestions.enumerated(), id: \.element.id) { index, suggestion in
+                        SuggestionButton(
+                            suggestion: suggestion,
+                            number: index + 1,
+                            isHighlighted: index == call.highlighted,
+                            isSending: call.pending?.index == index,
+                            showsNumber: card.suggestions.count > 1,
+                            action: { call.tapSuggestion(at: index) }
+                        )
+                    }
 
-                if let pending = call.pending {
-                    SendingBanner(method: pending.method, sensitive: card.isSensitive, onStop: call.stopPending)
+                    if let pending = call.pending {
+                        SendingBanner(method: pending.method, sensitive: card.isSensitive, onStop: call.stopPending)
+                    } else {
+                        if call.canCompose {
+                            SayOwnAnswerButton(action: call.startComposing)
+                        }
+                        AnswerHint(choices: card.suggestions.count, onNotRight: call.tapNotRight)
+                    }
                 } else {
-                    AnswerHint(choices: card.suggestions.count, onNotRight: call.tapNotRight)
+                    ComposePanel(call: call, card: card)
                 }
 
                 if let notice = call.notice {
@@ -41,6 +48,8 @@ struct AnswerCardView: View {
             }
             .padding(24)
         }
+        .scrollDismissesKeyboard(.interactively)
         .animation(.snappy, value: call.pending)
+        .animation(.snappy, value: call.compose)
     }
 }

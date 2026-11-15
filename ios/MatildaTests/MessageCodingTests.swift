@@ -30,6 +30,12 @@ struct MessageCodingTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
         #expect(object == ["type": "answer", "cardId": "k", "suggestionId": "0", "method": "nod"])
     }
+
+    @Test func encodesASentenceRayWantsSaid() throws {
+        let data = try JSONEncoder().encode(ClientMessage.say(cardID: "k", text: "Friday works.", method: .lips))
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: String])
+        #expect(object == ["type": "say", "cardId": "k", "text": "Friday works.", "method": "lips"])
+    }
 }
 
 private extension ServerEvent {
