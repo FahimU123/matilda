@@ -73,7 +73,7 @@ struct PracticeView: View {
         case .nod: "a nod"
         case .lips: "your lips"
         case .tap: "a tap"
-        case .voice: "your voice"
+        case .saved: "your saved details"
         }
     }
 

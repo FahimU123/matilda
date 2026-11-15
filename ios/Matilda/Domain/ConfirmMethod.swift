@@ -1,5 +1,5 @@
 nonisolated enum ConfirmMethod: String, Codable, Sendable {
-    case thumbs, nod, lips, tap, voice
+    case thumbs, nod, lips, tap, saved
 
     var pastTense: String {
         switch self {
@@ -7,7 +7,7 @@ nonisolated enum ConfirmMethod: String, Codable, Sendable {
         case .nod: "Nodded"
         case .lips: "Mouthed"
         case .tap: "Tapped"
-        case .voice: "Said"
+        case .saved: "From saved details"
         }
     }
 }

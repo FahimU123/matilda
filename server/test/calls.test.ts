@@ -52,11 +52,21 @@ describe("CallCoordinator", () => {
     expect(ctx.line.sent[0]).toMatchObject({ type: "ring", placeName: "Nest Street Pharmacy" });
 
     ctx.calls.connected(callId);
-    const spoken = ctx.calls.ask(callId, "What is his date of birth?");
+    const spoken = ctx.calls.ask(callId, "Pickup or delivery?");
     const card = await nextCard(ctx.app);
     ctx.calls.respond("ray", { type: "answer", cardId: card.id, suggestionId: "0", method: "thumbs" });
 
-    await expect(spoken).resolves.toBe("His date of birth is March 4, 1952.");
+    await expect(spoken).resolves.toBe("Pickup, please.");
+  });
+
+  it("answers saved details straight away without asking the user", async () => {
+    const { callId } = await ctx.calls.start("ray", "pharmacy");
+    await expect(ctx.calls.ask(callId, "What is his date of birth?")).resolves.toBe("His date of birth is March 4, 1952.");
+    expect(ctx.app.sent.some((m) => m.type === "card.open")).toBe(false);
+
+    await ctx.calls.finish(callId);
+    const [record] = await ctx.store.calls("ray", 1);
+    expect(record?.consents[0]).toMatchObject({ answer: "March 4, 1952", method: "saved" });
   });
 
   it("speaks a sensitive value only from the phone and logs it masked", async () => {
@@ -83,7 +93,7 @@ describe("CallCoordinator", () => {
 
   it("ignores answers from a different profile", async () => {
     const { callId } = await ctx.calls.start("ray", "pharmacy");
-    void ctx.calls.ask(callId, "Date of birth?");
+    void ctx.calls.ask(callId, "Pickup or delivery?");
     const card = await nextCard(ctx.app);
     ctx.calls.respond("someone-else", { type: "answer", cardId: card.id, suggestionId: "0", method: "tap" });
     expect(ctx.app.sent.some((m) => m.type === "card.closed")).toBe(false);

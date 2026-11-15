@@ -38,7 +38,7 @@ struct SendingBanner: View {
         case .nod: "airpodspro"
         case .lips: "mouth"
         case .tap: "hand.tap"
-        case .voice: "waveform"
+        case .saved: "person.text.rectangle"
         }
     }
 }

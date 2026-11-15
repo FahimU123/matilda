@@ -3,9 +3,10 @@ import { MatildaMark } from "@/components/MatildaMark";
 
 const exchange = [
   { who: "Pharmacist", text: "Can I get his date of birth?" },
-  { who: "Matilda", text: "One moment, Ray is answering." },
-  { who: "Ray", text: "Nods." },
   { who: "Matilda", text: "His date of birth is March 4, 1952." },
+  { who: "Pharmacist", text: "Pickup or delivery?" },
+  { who: "Ray", text: "Nods at Pickup." },
+  { who: "Matilda", text: "Pickup, please." },
 ];
 
 export default function Home() {

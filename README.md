@@ -8,11 +8,16 @@ Matilda is a phone voice for people whose own voice is hard to understand or gon
 
 ```
 Pharmacist asks "Date of birth?"
-  -> ElevenLabs agent (Gemini) calls the ask_user webhook and says "One moment, Ray is answering."
-  -> server: Gemini maps the question to a profile detail, builds an answer card, holds the webhook open
-  -> iPhone: card appears, Ray gives a thumbs up (Vision) or nods (AirPods head motion)
-  -> server resolves the webhook with "His date of birth is March 4, 1952."
+  -> ElevenLabs agent (Gemini) calls the ask_user webhook and says "One moment."
+  -> server: Gemini maps the question to a saved detail and answers right away: "His date of birth is March 4, 1952."
+
+Pharmacist asks "Pickup or delivery?"
+  -> server: Gemini sees a decision, builds an answer card, holds the webhook open
+  -> iPhone: card appears, Ray gives a thumbs up (Vision), nods (AirPods head motion), mouths a number or taps
+  -> server resolves the webhook with "Pickup, please."
   -> Matilda says exactly that sentence
+
+Private numbers (like the last four of an SSN) always come from the phone, after Face ID.
 ```
 
 Private numbers (social security, card numbers) never reach the server. The server only knows the last four digits; the iPhone reads the full number from the Keychain after Face ID and the consent log stores it masked.

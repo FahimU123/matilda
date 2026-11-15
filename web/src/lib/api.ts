@@ -40,7 +40,7 @@ export interface Profile {
 export interface ConsentEntry {
   question: string;
   answer: string;
-  method: "thumbs" | "nod" | "lips" | "tap" | "voice";
+  method: "thumbs" | "nod" | "lips" | "tap" | "saved";
   at: number;
 }
 
@@ -58,5 +58,5 @@ export const methodLabel: Record<ConsentEntry["method"], string> = {
   nod: "Head nod",
   lips: "Mouthed",
   tap: "Tapped",
-  voice: "Said yes",
+  saved: "From saved details",
 };

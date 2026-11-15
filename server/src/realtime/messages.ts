@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const ConfirmMethod = z.enum(["thumbs", "nod", "lips", "tap", "voice"]);
+const ConfirmMethod = z.enum(["thumbs", "nod", "lips", "tap", "saved"]);
 
 export const AppMessage = z.discriminatedUnion("type", [
   z.object({

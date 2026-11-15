@@ -3,7 +3,7 @@ import type { GoogleGenAI } from "@google/genai";
 import { buildCard, declineSay, sayForSensitive } from "../domain/answerCard.js";
 import { CallSession, type Speaker } from "../domain/callSession.js";
 import type { PendingAsks } from "../domain/pendingAsks.js";
-import { findPlace, maskValue, type Place, type Profile } from "../domain/profile.js";
+import { findField, findPlace, maskValue, type Place, type Profile } from "../domain/profile.js";
 import type { QuestionAnalyzer } from "../domain/questionAnalyzer.js";
 import type { Hub } from "../realtime/hub.js";
 import type { AppMessage } from "../realtime/messages.js";
@@ -83,6 +83,16 @@ export class CallCoordinator {
     if (call.session.phase === "ringing") this.connected(callId);
     const analysis = await this.analyzer.analyze(question, call.profile, call.place.purpose);
     if (this.active.get(callId) !== call) return "The call has ended.";
+
+    // Facts the family already saved are answered straight away; Ray only decides choices and private numbers.
+    if (analysis.kind === "field") {
+      const field = findField(call.profile, analysis.fieldKey);
+      if (field && !field.sensitive) {
+        const say = buildCard(question, analysis, call.profile).suggestions[0]!.say;
+        call.session.consent({ question, answer: field.value, method: "saved", at: this.now() });
+        return say;
+      }
+    }
     const { card, outcome, isNew } = this.asks.open(callId, buildCard(question, analysis, call.profile));
 
     if (isNew) {

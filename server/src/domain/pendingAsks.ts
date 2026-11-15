@@ -5,7 +5,7 @@ export type AskOutcome =
   | { kind: "declined"; method: ConfirmMethod }
   | { kind: "timedOut" };
 
-export type ConfirmMethod = "thumbs" | "nod" | "lips" | "tap" | "voice";
+export type ConfirmMethod = "thumbs" | "nod" | "lips" | "tap" | "saved";
 
 interface Pending {
   callId: string;
